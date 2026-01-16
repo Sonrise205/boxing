@@ -1,0 +1,1 @@
+return (require(script.Parent._Index["tpc9000_cleaner@0.1.2"].cleaner));
