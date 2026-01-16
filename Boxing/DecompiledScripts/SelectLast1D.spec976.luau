@@ -1,0 +1,60 @@
+return function() --[[ Line: 1 ]]
+    local v0 = require(script.Parent.SelectLast1D);
+    describe("Array/SelectLast1D", function() --[[ Line: 4 ]]
+        -- upvalues: v0 (copy)
+        it("should select nothing on an empty array", function() --[[ Line: 5 ]]
+            -- upvalues: v0 (ref)
+            expect(v0({}, function() --[[ Line: 6 ]]
+
+            end)).never.to.be.ok();
+        end);
+        it("should select the last item in an array for a return-true function", function() --[[ Line: 9 ]]
+            -- upvalues: v0 (ref)
+            expect(v0({
+                1
+            }, function() --[[ Line: 10 ]]
+                return true;
+            end)).to.equal(1);
+        end);
+        it("should select the last item greater than some number", function() --[[ Line: 15 ]]
+            -- upvalues: v0 (ref)
+            expect(v0({
+                1, 
+                2, 
+                4, 
+                8, 
+                16, 
+                32
+            }, function(v1) --[[ Line: 16 ]]
+                return v1 >= 8;
+            end)).to.equal(32);
+        end);
+        it("should select the last index greater than some number", function() --[[ Line: 21 ]]
+            -- upvalues: v0 (ref)
+            expect(v0({
+                1, 
+                2, 
+                4, 
+                8, 
+                16, 
+                32
+            }, function(_, v3) --[[ Line: 22 ]]
+                return v3 >= 3;
+            end)).to.equal(32);
+        end);
+        it("should return the index of the last matched value", function() --[[ Line: 27 ]]
+            -- upvalues: v0 (ref)
+            local _, v6 = v0({
+                1, 
+                2, 
+                3, 
+                4, 
+                5, 
+                6
+            }, function(v4) --[[ Line: 28 ]]
+                return v4 % 2 == 0;
+            end);
+            expect(v6).to.equal(6);
+        end);
+    end);
+end;

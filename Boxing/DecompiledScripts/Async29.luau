@@ -1,0 +1,1 @@
+return require(script.Parent._Index["tpc9000_async@0.2.1"].async);

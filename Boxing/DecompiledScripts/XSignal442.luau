@@ -1,0 +1,1 @@
+return (require(script.Parent.Parent["tpc9000_xsignal@2.0.0"].xsignal));

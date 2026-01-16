@@ -1,0 +1,3 @@
+return {
+    DisplayName = "TRAINING GYM"
+};

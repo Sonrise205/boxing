@@ -1,0 +1,10 @@
+local _ = require(script.Parent:WaitForChild("_SetType"));
+return function(v1, v2) --[[ Line: 6 ]] --[[ Name: Difference ]]
+    local v3 = {};
+    for v4 in v1 do
+        if v2[v4] == nil then
+            v3[v4] = true;
+        end;
+    end;
+    return v3;
+end;

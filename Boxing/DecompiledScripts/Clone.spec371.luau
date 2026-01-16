@@ -1,0 +1,51 @@
+return function() --[[ Line: 1 ]]
+    local l_Clone_0 = require(script.Parent:FindFirstChild("Clone"));
+    local v1 = require(script.Parent.Equals);
+    describe("Map/Clone", function() --[[ Line: 5 ]]
+        -- upvalues: l_Clone_0 (copy), v1 (copy)
+        it("it should copy a blank array into a new blank array", function() --[[ Line: 6 ]]
+            -- upvalues: l_Clone_0 (ref)
+            local v2 = {};
+            local v3 = l_Clone_0(v2);
+            expect(next(v3)).never.to.be.ok();
+            expect(v2).never.to.equal(v3);
+        end);
+        it("should copy a single element", function() --[[ Line: 14 ]]
+            -- upvalues: l_Clone_0 (ref), v1 (ref)
+            local v4 = {
+                X = 1
+            };
+            local v5 = l_Clone_0(v4);
+            expect(v4).never.to.equal(v5);
+            expect(v1(v4, v5)).to.equal(true);
+        end);
+        it("should copy a multiple elements", function() --[[ Line: 22 ]]
+            -- upvalues: l_Clone_0 (ref), v1 (ref)
+            local v6 = {
+                X = 1, 
+                Y = 2, 
+                Z = 3
+            };
+            local v7 = l_Clone_0(v6);
+            expect(v6).never.to.equal(v7);
+            expect(v1(v6, v7)).to.equal(true);
+        end);
+        it("should copy a nested table", function() --[[ Line: 30 ]]
+            -- upvalues: l_Clone_0 (ref)
+            local v8 = {
+                X = 1, 
+                Y = {
+                    Z = 2, 
+                    W = {
+                        P = "Test"
+                    }
+                }
+            };
+            local v9 = l_Clone_0(v8);
+            expect(v8).never.to.equal(v9);
+            expect(v9.X).to.equal(1);
+            expect(v9.Y).to.be.ok();
+            expect(v9.Y).to.equal(v8.Y);
+        end);
+    end);
+end;
