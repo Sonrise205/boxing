@@ -1,0 +1,1 @@
+return require(script.Parent._Index["tpc9000_rosyn@0.4.2"].rosyn);

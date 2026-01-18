@@ -1,0 +1,3 @@
+return {
+    DisplayName = "VOID SHRINE"
+};
