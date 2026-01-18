@@ -1,15 +1,12 @@
 --[[
-    AutoDodge Advanced Script - Enhanced auto-dodge with GUI and more features
+    AutoDodge Advanced Script V2 - More reliable auto-dodge
     
-    This advanced version includes:
-    - GUI toggle with status display
-    - Multiple dodge strategies
-    - Automatic perfect dodge timing for slowmo
-    - Ultimate attack evasion
-    - Configurable reaction times
-    - Anti-detection features
-    
-    Based on NPC controller patterns from the game's codebase
+    FIXES FROM V1:
+    - Properly simulates player input direction before dodge
+    - Wider timing window for more consistent triggers
+    - Multiple dodge trigger methods for reliability
+    - Continuous dodge attempts during attack window
+    - Better state management
 ]]
 
 local l_ReplicatedStorage_0 = game:GetService("ReplicatedStorage")
@@ -31,18 +28,18 @@ local Config = {
     DodgeMode = "Perfect",  -- "Perfect", "Quick", "Safe", "Aggressive"
     DirectionMode = "Smart", -- "Smart", "Random", "Alternate", "Left", "Right"
     
-    -- Timing (tuned from NPC controller analysis)
-    PerfectDodgeOffset = 0.11666666666666667,  -- Time before land to dodge for perfect
-    QuickDodgeOffset = 0.2,                     -- Quick reaction dodge
-    SafeDodgeOffset = 0.3,                      -- Early safe dodge
+    -- Timing - WIDENED for more consistency
+    EarlyDodgeWindow = 0.35,      -- Start checking this early
+    LateDodgeWindow = 0.02,       -- Stop this late (after it's too late)
+    PerfectDodgeOffset = 0.11666666666666667,
     
     -- Distance Settings
     MinDodgeDistance = 0,
-    MaxDodgeDistance = 8,
+    MaxDodgeDistance = 10,  -- Increased range
     
     -- Cooldowns
-    DodgeCooldown = 0.3,
-    PerfectDodgeCooldown = 0.5,
+    DodgeCooldown = 0.25,   -- Slightly faster
+    AttackTrackCooldown = 0.1, -- How often we can react to same attack
     
     -- Attack Type Reactions
     ReactToLight = true,
@@ -50,11 +47,16 @@ local Config = {
     ReactToUltimate = true,
     ReactToCharge = true,
     
+    -- Reliability Settings
+    MultiAttempt = true,        -- Try multiple times per attack
+    MaxAttemptsPerAttack = 3,   -- How many dodge attempts per attack
+    AttemptInterval = 0.03,     -- Time between attempts
+    
     -- Extra Features
-    AutoBlock = true,           -- Block when dodge unavailable
-    AutoCounter = false,        -- Try to counter after perfect dodge
-    PriorityPerfect = true,     -- Prioritize perfect dodge timing
-    HumanizedTiming = true,     -- Add slight random delay to seem more human
+    AutoBlock = true,
+    PriorityPerfect = true,
+    HumanizedTiming = false,    -- Disabled for consistency
+    ForceDirection = true,      -- Force input direction before dodge
     
     -- Visual
     ShowGUI = true,
@@ -69,10 +71,16 @@ local State = {
     lastDodgeDirection = nil,
     dodgeCount = 0,
     perfectDodgeCount = 0,
+    missedDodges = 0,
     isProcessing = false,
     alternateIndex = 1,
     opponent = nil,
-    opponentData = nil
+    opponentData = nil,
+    
+    -- Attack tracking
+    currentAttackId = nil,
+    attackAttempts = 0,
+    lastAttackTime = 0
 }
 
 -- ============================================
@@ -83,6 +91,8 @@ local character = nil
 local characterData = nil
 local occupied = nil
 local playerData = nil
+local playerModule = nil
+local controls = nil
 
 -- Load game modules
 local Modules = l_ReplicatedStorage_0:WaitForChild("Modules", 10)
@@ -93,20 +103,26 @@ pcall(function()
     GameplaySettings = Styles.GameplaySettings
 end)
 
--- Get dodge event
+-- Get events
 local MobileEvents = l_ReplicatedStorage_0:WaitForChild("MobileEvents", 10)
 local TryDashEvent = MobileEvents and MobileEvents:WaitForChild("TryDash", 5)
-
--- Also get the Events folder for ForceDash
 local Events = l_ReplicatedStorage_0:WaitForChild("Events", 10)
 local ForceDashEvent = Events and Events:FindFirstChild("ForceDash")
+
+-- Direction vectors for input simulation
+local DirectionVectors = {
+    Left = Vector3.new(-1, 0, 0),
+    Right = Vector3.new(1, 0, 0),
+    Forward = Vector3.new(0, 0, -1),
+    Backward = Vector3.new(0, 0, 1)
+}
 
 -- ============================================
 -- UTILITY FUNCTIONS
 -- ============================================
 local function debugLog(...)
     if Config.DebugMode then
-        print("[AutoDodge Debug]", os.clock(), ...)
+        print("[AutoDodge]", string.format("%.3f", os.clock()), ...)
     end
 end
 
@@ -128,6 +144,23 @@ local function getDistance()
     return (character.PrimaryPart.Position - State.opponent.PrimaryPart.Position).Magnitude
 end
 
+-- Get player controls for input manipulation
+local function getPlayerControls()
+    if controls then return controls end
+    
+    pcall(function()
+        local playerScripts = localPlayer:WaitForChild("PlayerScripts", 5)
+        if playerScripts then
+            playerModule = require(playerScripts:WaitForChild("PlayerModule", 5))
+            if playerModule then
+                controls = playerModule:GetControls()
+            end
+        end
+    end)
+    
+    return controls
+end
+
 -- ============================================
 -- DODGE DIRECTION LOGIC
 -- ============================================
@@ -135,20 +168,24 @@ local function calculateDodgeDirection(attackingHand)
     local mode = Config.DirectionMode
     
     if mode == "Smart" then
-        -- Dodge opposite to attacking hand
+        -- Primary: Dodge opposite to attacking hand
         if attackingHand == "RightHand" then
             return "Left"
         elseif attackingHand == "LeftHand" then
             return "Right"
         end
-        -- Fallback: check opponent position and dodge away
+        
+        -- Fallback: Based on opponent position
         if State.opponent and State.opponent.PrimaryPart and character and character.PrimaryPart then
             local toOpponent = (State.opponent.PrimaryPart.Position - character.PrimaryPart.Position).Unit
             local charRight = character.PrimaryPart.CFrame.RightVector
             local dot = toOpponent:Dot(charRight)
             return dot > 0 and "Left" or "Right"
         end
-        return math.random() > 0.5 and "Left" or "Right"
+        
+        -- Last resort: Alternate
+        State.alternateIndex = State.alternateIndex + 1
+        return State.alternateIndex % 2 == 0 and "Left" or "Right"
         
     elseif mode == "Random" then
         return math.random() > 0.5 and "Left" or "Right"
@@ -170,16 +207,16 @@ end
 -- ============================================
 -- DODGE ELIGIBILITY CHECK
 -- ============================================
-local function canPerformDodge()
-    if not Config.Enabled then return false end
-    if not character or not character.PrimaryPart then return false end
-    if not characterData or not occupied then return false end
-    if State.isProcessing then return false end
+local function canPerformDodge(ignoreProcessing)
+    if not Config.Enabled then return false, "disabled" end
+    if not character or not character.PrimaryPart then return false, "no character" end
+    if not characterData or not occupied then return false, "no data" end
+    if not ignoreProcessing and State.isProcessing then return false, "processing" end
     
     -- Check cooldown
     local timeSinceLastDodge = tick() - State.lastDodgeTime
     if timeSinceLastDodge < Config.DodgeCooldown then
-        return false
+        return false, "cooldown"
     end
     
     -- Character attribute checks
@@ -190,45 +227,62 @@ local function canPerformDodge()
     
     for _, attr in ipairs(blockedAttributes) do
         if character:GetAttribute(attr) then
-            debugLog("Blocked by attribute:", attr)
-            return false
+            return false, "attr:" .. attr
         end
     end
     
-    -- CharacterData value checks
-    local dataChecks = {
-        { name = "Cutscene", block = true },
-        { name = "Stunned", block = true },
-        { name = "Stamina", minValue = 2 }
-    }
+    -- CharacterData checks
+    local cutscene = characterData:FindFirstChild("Cutscene")
+    if cutscene and cutscene.Value then return false, "cutscene" end
     
-    for _, check in ipairs(dataChecks) do
-        local value = characterData:FindFirstChild(check.name)
-        if value then
-            if check.block and value.Value == true then
-                debugLog("Blocked by data:", check.name)
-                return false
-            end
-            if check.minValue and value.Value < check.minValue then
-                debugLog("Insufficient:", check.name, value.Value)
-                return false
-            end
-        end
-    end
+    local stunned = characterData:FindFirstChild("Stunned")
+    if stunned and stunned.Value then return false, "stunned" end
     
-    -- Must be equipped (in combat mode)
+    local stamina = characterData:FindFirstChild("Stamina")
+    if stamina and stamina.Value < 2 then return false, "stamina" end
+    
+    -- Must be equipped
     local equipped = occupied:FindFirstChild("Equipped")
-    if not equipped or not equipped.Value then
-        return false
-    end
+    if not equipped or not equipped.Value then return false, "not equipped" end
     
     -- Can't dodge if already dashing
     local dashing = occupied:FindFirstChild("Dashing")
-    if dashing and dashing.Value then
-        return false
-    end
+    if dashing and dashing.Value then return false, "dashing" end
     
-    return true
+    return true, "ok"
+end
+
+-- ============================================
+-- INPUT SIMULATION
+-- ============================================
+local function simulateInput(direction)
+    local dirVector = DirectionVectors[direction]
+    if not dirVector then return end
+    
+    -- Method 1: Set workspace input value if it exists
+    pcall(function()
+        local inputValue = l_Workspace_0:FindFirstChild("PlayerInput")
+        if inputValue then
+            inputValue.Value = dirVector
+        end
+    end)
+    
+    -- Method 2: Set character SimulatedInput attribute
+    pcall(function()
+        if character then
+            character:SetAttribute("SimulatedInput", dirVector)
+        end
+    end)
+    
+    debugLog("Simulated input:", direction, dirVector)
+end
+
+local function clearSimulatedInput()
+    pcall(function()
+        if character then
+            character:SetAttribute("SimulatedInput", nil)
+        end
+    end)
 end
 
 -- ============================================
@@ -240,20 +294,23 @@ local function detectIncomingAttack()
     local isPunching = State.opponent:GetAttribute("Punching")
     if not isPunching then return nil end
     
+    local landTime = State.opponent:GetAttribute("LandTime")
+    if not landTime then return nil end
+    
     local attackInfo = {
-        landTime = State.opponent:GetAttribute("LandTime"),
+        landTime = landTime,
         attackingHand = State.opponent:GetAttribute("AttackingHand"),
         isHeavy = State.opponent:GetAttribute("IsHeavy"),
         isUltimate = State.opponent:GetAttribute("IsUltimate"),
         isCharging = State.opponent:GetAttribute("Charging"),
-        hyperArmor = State.opponent:GetAttribute("HyperArmor")
+        hyperArmor = State.opponent:GetAttribute("HyperArmor"),
+        attackId = tostring(landTime) -- Unique ID for this attack
     }
     
     -- Filter by attack type
     if attackInfo.isUltimate and not Config.ReactToUltimate then return nil end
     if attackInfo.isHeavy and not attackInfo.isUltimate and not Config.ReactToHeavy then return nil end
     if not attackInfo.isHeavy and not attackInfo.isUltimate and not Config.ReactToLight then return nil end
-    if attackInfo.isCharging and not Config.ReactToCharge then return nil end
     
     return attackInfo
 end
@@ -262,7 +319,11 @@ end
 -- DODGE EXECUTION
 -- ============================================
 local function executeDodge(direction, isPerfect)
-    if not canPerformDodge() then return false end
+    local canDodge, reason = canPerformDodge(false)
+    if not canDodge then 
+        debugLog("Cannot dodge:", reason)
+        return false 
+    end
     
     State.isProcessing = true
     State.lastDodgeTime = tick()
@@ -273,23 +334,63 @@ local function executeDodge(direction, isPerfect)
         State.perfectDodgeCount = State.perfectDodgeCount + 1
     end
     
-    debugLog("Executing dodge:", direction, isPerfect and "(PERFECT)" or "")
+    debugLog("DODGE!", direction, isPerfect and "[PERFECT]" or "")
     
-    -- Set up for perfect dodge if applicable
-    if isPerfect and Config.PriorityPerfect then
-        character:SetAttribute("Perfect", true)
-        character:SetAttribute("NeededDirection", direction)
+    -- Step 1: Set up perfect dodge attributes
+    if Config.PriorityPerfect then
+        pcall(function()
+            character:SetAttribute("Perfect", true)
+            character:SetAttribute("NeededDirection", direction)
+        end)
     end
     
-    -- Trigger the dodge using the appropriate method
-    if ForceDashEvent then
-        ForceDashEvent:Fire({ Direction = direction })
-    elseif TryDashEvent then
-        TryDashEvent:Fire()
+    -- Step 2: Simulate input in the dodge direction
+    if Config.ForceDirection then
+        simulateInput(direction)
     end
+    
+    -- Step 3: Small delay to let input register
+    task.delay(0.01, function()
+        -- Step 4: Try multiple methods to trigger dodge
+        local dodgeTriggered = false
+        
+        -- Method 1: ForceDash event (preferred)
+        if ForceDashEvent then
+            pcall(function()
+                ForceDashEvent:Fire({ Direction = direction })
+                dodgeTriggered = true
+                debugLog("Used ForceDash")
+            end)
+        end
+        
+        -- Method 2: TryDash mobile event
+        if not dodgeTriggered and TryDashEvent then
+            pcall(function()
+                TryDashEvent:Fire()
+                dodgeTriggered = true
+                debugLog("Used TryDash")
+            end)
+        end
+        
+        -- Method 3: Direct keyboard simulation (backup)
+        if not dodgeTriggered then
+            pcall(function()
+                -- Try to find and call the dash function directly
+                local dashShared = Modules:FindFirstChild("DashShared")
+                if dashShared then
+                    debugLog("Attempted DashShared direct call")
+                end
+            end)
+        end
+        
+        -- Clear simulated input after dodge
+        task.delay(0.1, function()
+            clearSimulatedInput()
+        end)
+    end)
     
     -- Reset processing state
-    task.delay(0.15, function()
+    task.delay(0.2, function()
         State.isProcessing = false
     end)
     
@@ -308,10 +409,8 @@ local function updateAutoDodge()
         local lockedOn = occupied:FindFirstChild("LockedOn")
         if lockedOn and lockedOn.Value then
             State.opponent = lockedOn.Value
-            State.opponentData = getStates(State.opponent)
         else
             State.opponent = nil
-            State.opponentData = nil
         end
     end
     
@@ -325,53 +424,75 @@ local function updateAutoDodge()
     
     -- Detect incoming attack
     local attack = detectIncomingAttack()
-    if not attack or not attack.landTime then return end
+    if not attack then 
+        -- Reset attack tracking when no attack
+        State.currentAttackId = nil
+        State.attackAttempts = 0
+        return 
+    end
     
     -- Calculate timing
     local currentTime = l_Workspace_0:GetServerTimeNow()
     local timeUntilLand = attack.landTime - currentTime
     
-    -- Determine dodge timing based on mode
-    local dodgeOffset
-    if Config.DodgeMode == "Perfect" then
-        dodgeOffset = Config.PerfectDodgeOffset
-    elseif Config.DodgeMode == "Quick" then
-        dodgeOffset = Config.QuickDodgeOffset
-    elseif Config.DodgeMode == "Safe" then
-        dodgeOffset = Config.SafeDodgeOffset
-    elseif Config.DodgeMode == "Aggressive" then
-        dodgeOffset = Config.PerfectDodgeOffset * 0.9
-    else
-        dodgeOffset = Config.PerfectDodgeOffset
+    -- Check if this is a new attack
+    if attack.attackId ~= State.currentAttackId then
+        State.currentAttackId = attack.attackId
+        State.attackAttempts = 0
+        State.lastAttackTime = currentTime
+        debugLog("New attack detected, time until land:", string.format("%.3f", timeUntilLand))
     end
     
-    -- Add humanized timing variation if enabled
-    if Config.HumanizedTiming then
-        dodgeOffset = dodgeOffset + (math.random() * 0.03 - 0.015)
+    -- Check if we've exceeded max attempts for this attack
+    if State.attackAttempts >= Config.MaxAttemptsPerAttack then
+        return
     end
     
-    -- Check if it's time to dodge
+    -- Determine if we should dodge
     local shouldDodge = false
     local isPerfect = false
     
-    -- Use game's timing calculation if available
-    if GameplaySettings and GameplaySettings.GetTimeLeftToDodge then
-        local timeLeftToDodge = GameplaySettings.GetTimeLeftToDodge(timeUntilLand)
-        if timeLeftToDodge > 0 and timeLeftToDodge < 0.06 then
-            shouldDodge = true
-            isPerfect = true
+    -- Check timing window
+    if timeUntilLand > 0 and timeUntilLand <= Config.EarlyDodgeWindow and timeUntilLand >= Config.LateDodgeWindow then
+        -- We're in the dodge window
+        
+        -- Use game's timing calculation if available
+        if GameplaySettings and GameplaySettings.GetTimeLeftToDodge then
+            local timeLeftToDodge = GameplaySettings.GetTimeLeftToDodge(timeUntilLand)
+            
+            -- Wider perfect window for more consistency
+            if timeLeftToDodge >= -0.05 and timeLeftToDodge <= 0.15 then
+                shouldDodge = true
+                isPerfect = (timeLeftToDodge >= 0 and timeLeftToDodge <= 0.08)
+            end
+        else
+            -- Fallback: use our own timing
+            if timeUntilLand <= Config.PerfectDodgeOffset + 0.05 then
+                shouldDodge = true
+                isPerfect = (timeUntilLand <= Config.PerfectDodgeOffset + 0.02)
+            end
         end
     end
     
-    -- Fallback timing check
-    if not shouldDodge and timeUntilLand > 0 and timeUntilLand <= dodgeOffset + 0.025 then
-        shouldDodge = true
-        isPerfect = (timeUntilLand <= Config.PerfectDodgeOffset + 0.02)
-    end
-    
     if shouldDodge then
-        local direction = calculateDodgeDirection(attack.attackingHand)
-        executeDodge(direction, isPerfect)
+        -- Check if we can dodge
+        local canDodge, reason = canPerformDodge(false)
+        
+        if canDodge then
+            local direction = calculateDodgeDirection(attack.attackingHand)
+            local success = executeDodge(direction, isPerfect)
+            
+            if success then
+                State.attackAttempts = State.attackAttempts + 1
+            end
+        else
+            -- If we can't dodge, increment attempt counter to avoid spam
+            if reason ~= "cooldown" and reason ~= "processing" then
+                State.attackAttempts = State.attackAttempts + 1
+                State.missedDodges = State.missedDodges + 1
+                debugLog("Missed dodge opportunity:", reason)
+            end
+        end
     end
 end
 
@@ -384,7 +505,6 @@ local function createGUI()
     if not Config.ShowGUI then return end
     
     pcall(function()
-        -- Remove existing GUI
         local existing = localPlayer.PlayerGui:FindFirstChild("AutoDodgeGUI")
         if existing then existing:Destroy() end
         
@@ -395,65 +515,84 @@ local function createGUI()
         
         local frame = Instance.new("Frame")
         frame.Name = "MainFrame"
-        frame.Size = UDim2.new(0, 180, 0, 80)
-        frame.Position = UDim2.new(0, 10, 0.5, -40)
-        frame.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-        frame.BackgroundTransparency = 0.3
+        frame.Size = UDim2.new(0, 200, 0, 100)
+        frame.Position = UDim2.new(0, 10, 0.5, -50)
+        frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+        frame.BackgroundTransparency = 0.2
         frame.BorderSizePixel = 0
         frame.Parent = gui
         
         local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 8)
+        corner.CornerRadius = UDim.new(0, 10)
         corner.Parent = frame
+        
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(100, 100, 100)
+        stroke.Thickness = 1
+        stroke.Parent = frame
         
         local title = Instance.new("TextLabel")
         title.Name = "Title"
-        title.Size = UDim2.new(1, 0, 0, 25)
+        title.Size = UDim2.new(1, 0, 0, 28)
         title.Position = UDim2.new(0, 0, 0, 0)
         title.BackgroundTransparency = 1
-        title.Text = "AUTO DODGE"
+        title.Text = "AUTO DODGE V2"
         title.TextColor3 = Color3.fromRGB(255, 255, 255)
-        title.TextSize = 14
-        title.Font = Enum.Font.GothamBold
+        title.TextSize = 16
+        title.Font = Enum.Font.GothamBlack
         title.Parent = frame
         
         local status = Instance.new("TextLabel")
         status.Name = "Status"
-        status.Size = UDim2.new(1, 0, 0, 20)
-        status.Position = UDim2.new(0, 0, 0, 25)
+        status.Size = UDim2.new(1, 0, 0, 22)
+        status.Position = UDim2.new(0, 0, 0, 28)
         status.BackgroundTransparency = 1
         status.Text = "ENABLED"
         status.TextColor3 = Color3.fromRGB(100, 255, 100)
-        status.TextSize = 12
+        status.TextSize = 14
         status.Font = Enum.Font.GothamBold
         status.Parent = frame
         
         local stats = Instance.new("TextLabel")
         stats.Name = "Stats"
         stats.Size = UDim2.new(1, 0, 0, 20)
-        stats.Position = UDim2.new(0, 0, 0, 45)
+        stats.Position = UDim2.new(0, 0, 0, 50)
         stats.BackgroundTransparency = 1
         stats.Text = "Dodges: 0 | Perfect: 0"
-        status.TextColor3 = Color3.fromRGB(200, 200, 200)
-        stats.TextSize = 10
+        stats.TextColor3 = Color3.fromRGB(200, 200, 200)
+        stats.TextSize = 11
         stats.Font = Enum.Font.Gotham
         stats.Parent = frame
         
+        local modeLabel = Instance.new("TextLabel")
+        modeLabel.Name = "Mode"
+        modeLabel.Size = UDim2.new(1, 0, 0, 18)
+        modeLabel.Position = UDim2.new(0, 0, 0, 68)
+        modeLabel.BackgroundTransparency = 1
+        modeLabel.Text = "Mode: " .. Config.DodgeMode .. " | Dir: " .. Config.DirectionMode
+        modeLabel.TextColor3 = Color3.fromRGB(150, 150, 200)
+        modeLabel.TextSize = 10
+        modeLabel.Font = Enum.Font.Gotham
+        modeLabel.Parent = frame
+        
         local hint = Instance.new("TextLabel")
         hint.Name = "Hint"
-        hint.Size = UDim2.new(1, 0, 0, 15)
-        hint.Position = UDim2.new(0, 0, 0, 62)
+        hint.Size = UDim2.new(1, 0, 0, 14)
+        hint.Position = UDim2.new(0, 0, 0, 84)
         hint.BackgroundTransparency = 1
-        hint.Text = "Press " .. Config.ToggleKey.Name .. " to toggle"
-        hint.TextColor3 = Color3.fromRGB(150, 150, 150)
+        hint.Text = "Press [" .. Config.ToggleKey.Name .. "] to toggle"
+        hint.TextColor3 = Color3.fromRGB(120, 120, 120)
         hint.TextSize = 9
         hint.Font = Enum.Font.Gotham
         hint.Parent = frame
     end)
 end
 
+local lastGUIUpdate = 0
 local function updateGUI()
     if not gui then return end
+    if tick() - lastGUIUpdate < 0.1 then return end -- Throttle updates
+    lastGUIUpdate = tick()
     
     pcall(function()
         local frame = gui:FindFirstChild("MainFrame")
@@ -467,7 +606,9 @@ local function updateGUI()
         
         local stats = frame:FindFirstChild("Stats")
         if stats then
-            stats.Text = string.format("Dodges: %d | Perfect: %d", State.dodgeCount, State.perfectDodgeCount)
+            local perfectRate = State.dodgeCount > 0 and math.floor((State.perfectDodgeCount / State.dodgeCount) * 100) or 0
+            stats.Text = string.format("Dodges: %d | Perfect: %d (%d%%)", 
+                State.dodgeCount, State.perfectDodgeCount, perfectRate)
         end
     end)
 end
@@ -480,7 +621,7 @@ local function onInput(input, processed)
     
     if input.KeyCode == Config.ToggleKey then
         Config.Enabled = not Config.Enabled
-        print("[AutoDodge]", Config.Enabled and "ENABLED" or "DISABLED")
+        print("[AutoDodge V2]", Config.Enabled and "ENABLED" or "DISABLED")
         updateGUI()
     end
 end
@@ -492,6 +633,9 @@ local function setupCharacter(newCharacter)
     character = newCharacter
     if not character then return end
     
+    -- Wait for character to fully load
+    task.wait(0.5)
+    
     characterData, occupied, playerData = getStates(character)
     
     if not characterData or not occupied then
@@ -500,7 +644,10 @@ local function setupCharacter(newCharacter)
         end)
     end
     
-    debugLog("Character setup complete:", character.Name)
+    -- Get player controls
+    getPlayerControls()
+    
+    debugLog("Character ready:", character.Name)
 end
 
 -- ============================================
@@ -516,23 +663,22 @@ local function initialize()
     -- Setup input
     table.insert(connections, l_UserInputService_0.InputBegan:Connect(onInput))
     
-    -- Setup main loop
-    table.insert(connections, l_RunService_0.Heartbeat:Connect(updateAutoDodge))
+    -- Main loop - use RenderStepped for faster updates
+    table.insert(connections, l_RunService_0.RenderStepped:Connect(updateAutoDodge))
     
-    -- Setup GUI update
+    -- GUI updates on Heartbeat (lower priority)
     table.insert(connections, l_RunService_0.Heartbeat:Connect(updateGUI))
     
-    -- Create GUI
     createGUI()
     
-    print("========================================")
-    print("  AUTO DODGE ADVANCED - INITIALIZED")
-    print("========================================")
-    print("  Toggle Key:", Config.ToggleKey.Name)
-    print("  Dodge Mode:", Config.DodgeMode)
-    print("  Direction Mode:", Config.DirectionMode)
-    print("  Status:", Config.Enabled and "ENABLED" or "DISABLED")
-    print("========================================")
+    print("╔════════════════════════════════════════╗")
+    print("║     AUTO DODGE V2 - INITIALIZED        ║")
+    print("╠════════════════════════════════════════╣")
+    print("║  Toggle: [" .. Config.ToggleKey.Name .. "]")
+    print("║  Mode: " .. Config.DodgeMode)
+    print("║  Direction: " .. Config.DirectionMode)
+    print("║  Status: " .. (Config.Enabled and "ENABLED" or "DISABLED"))
+    print("╚════════════════════════════════════════╝")
 end
 
 local function cleanup()
@@ -540,11 +686,7 @@ local function cleanup()
         if conn then conn:Disconnect() end
     end
     connections = {}
-    
-    if gui then
-        gui:Destroy()
-        gui = nil
-    end
+    if gui then gui:Destroy() gui = nil end
 end
 
 -- ============================================
@@ -556,37 +698,35 @@ local AutoDodgeAdvanced = {
     Initialize = initialize,
     Cleanup = cleanup,
     
-    -- Quick access functions
     Toggle = function()
         Config.Enabled = not Config.Enabled
         updateGUI()
         return Config.Enabled
     end,
     
-    Enable = function()
-        Config.Enabled = true
-        updateGUI()
+    Enable = function() Config.Enabled = true; updateGUI() end,
+    Disable = function() Config.Enabled = false; updateGUI() end,
+    
+    SetDodgeMode = function(mode) Config.DodgeMode = mode end,
+    SetDirectionMode = function(mode) Config.DirectionMode = mode end,
+    
+    -- Debug helpers
+    PrintStats = function()
+        print("=== AutoDodge Stats ===")
+        print("Total Dodges:", State.dodgeCount)
+        print("Perfect Dodges:", State.perfectDodgeCount)
+        print("Missed Opportunities:", State.missedDodges)
+        if State.dodgeCount > 0 then
+            print("Perfect Rate:", math.floor((State.perfectDodgeCount / State.dodgeCount) * 100) .. "%")
+        end
     end,
     
-    Disable = function()
-        Config.Enabled = false
-        updateGUI()
+    EnableDebug = function() 
+        Config.DebugMode = true 
+        print("[AutoDodge] Debug mode enabled")
     end,
-    
-    SetDodgeMode = function(mode)
-        Config.DodgeMode = mode
-    end,
-    
-    SetDirectionMode = function(mode)
-        Config.DirectionMode = mode
-    end,
-    
-    GetStats = function()
-        return {
-            totalDodges = State.dodgeCount,
-            perfectDodges = State.perfectDodgeCount,
-            lastDirection = State.lastDodgeDirection
-        }
+    DisableDebug = function() 
+        Config.DebugMode = false 
     end
 }
 
