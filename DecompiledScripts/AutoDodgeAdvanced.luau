@@ -1,19 +1,15 @@
 --[[
-    AutoDodge Advanced v4.0 - Complete Exploit Suite
+    Boxing Exploit Hub v4.0
+    Made by: Rise
     
-    Features found from comprehensive codebase scan:
-    1. Auto-Dodge with perfect timing
-    2. Unlimited Stamina/Block/Ultimate (client-side display)
-    3. HyperArmor/SuperArmor toggle
-    4. DashInvulnerable exploit
-    5. SlowMoNoDamage protection
-    6. Hitbox/Hurtbox visualization
-    7. Auto-Counter after dodge
-    8. Free Dash while stunned
-    9. Speed modifier
-    10. Auto-Attack mode
-    11. ESP/Player Info display
+    Comprehensive exploit suite based on full codebase analysis
+    Press U to hide/unhide UI
 ]]
+
+-- Load Fluent UI Library
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 -- Services
 local Players = game:GetService("Players")
@@ -27,20 +23,16 @@ local LocalPlayer = Players.LocalPlayer
 
 -- Configuration
 local Config = {
-    -- Main Features
-    Enabled = true,
-    Debug = false,
-    
     -- Dodge Settings
-    AutoDodge = true,
+    AutoDodge = false,
     DodgeWindow = 0.15,
-    DodgeMode = "Always", -- "Always", "WhenLocked", "WhenAttacked"
-    DirectionMode = "Away", -- "Away", "Left", "Right", "Random"
+    DodgeMode = "Always",
+    DirectionMode = "Away",
     MultiAttempt = true,
     MaxAttempts = 3,
     
     -- Combat Exploits
-    UnlimitedStamina = true,
+    UnlimitedStamina = false,
     HyperArmor = false,
     SuperArmor = false,
     SlowMoNoDamage = false,
@@ -54,22 +46,18 @@ local Config = {
     ESPEnabled = false,
     ShowOpponentInfo = false,
     
-    -- Speed Exploits
+    -- Speed/Movement
     SpeedHack = false,
     SpeedMultiplier = 1.5,
     
-    -- Auto Attack
+    -- Auto Features
     AutoAttack = false,
     AutoAttackDelay = 0.3,
+    AutoBlock = false,
     
-    -- Keybinds
-    ToggleKey = Enum.KeyCode.RightBracket,
-    DodgeToggleKey = Enum.KeyCode.P,
-    StaminaToggleKey = Enum.KeyCode.O,
-    HyperArmorKey = Enum.KeyCode.I,
-    ESPKey = Enum.KeyCode.U,
-    HitboxKey = Enum.KeyCode.Y,
-    AutoAttackKey = Enum.KeyCode.T,
+    -- Misc
+    AntiAFK = true,
+    InfiniteJump = false,
 }
 
 -- State tracking
@@ -83,9 +71,10 @@ local State = {
     isFeatureActive = {},
     espObjects = {},
     hitboxVisuals = {},
+    connections = {},
 }
 
--- Get character utilities
+-- Utility Functions
 local function getCharacter()
     return LocalPlayer.Character
 end
@@ -100,16 +89,12 @@ local function getHumanoidRootPart()
     return char and char:FindFirstChild("HumanoidRootPart")
 end
 
--- Get player state data
 local function getPlayerState()
     local char = getCharacter()
     if not char then return nil end
-    
     local states = Workspace:FindFirstChild("States")
     if not states then return nil end
-    
-    local playerState = states:FindFirstChild(char.Name)
-    return playerState
+    return states:FindFirstChild(char.Name)
 end
 
 local function getCharacterData()
@@ -122,55 +107,6 @@ local function getOccupied()
     return state and state:FindFirstChild("Occupied")
 end
 
-local function getPlayerData()
-    local state = getPlayerState()
-    return state and state:FindFirstChild("PlayerData")
-end
-
--- Get events
-local Events = nil
-local MobileEvents = nil
-local ForceDashEvent = nil
-local TryDashEvent = nil
-local TryAttackBridge = nil
-local TryAbilityBridge = nil
-
-local function initializeEvents()
-    pcall(function()
-        Events = ReplicatedStorage:WaitForChild("Events", 5)
-        MobileEvents = ReplicatedStorage:WaitForChild("MobileEvents", 5)
-        
-        if Events then
-            ForceDashEvent = Events:FindFirstChild("ForceDash")
-        end
-        
-        if MobileEvents then
-            TryDashEvent = MobileEvents:FindFirstChild("TryDash")
-        end
-        
-        -- Try to get BridgeNet2 references
-        local success, bridgeNet = pcall(function()
-            return shared.BridgeNet2 or require(game:GetService("ReplicatedFirst"):WaitForChild("BridgeNet2", 5))
-        end)
-        
-        if success and bridgeNet then
-            pcall(function()
-                TryAttackBridge = bridgeNet.ReferenceBridge("TryAttack")
-                TryAbilityBridge = bridgeNet.ReferenceBridge("TryAbility")
-            end)
-        end
-    end)
-    
-    if Config.Debug then
-        print("[AutoDodge] Events initialized:")
-        print("  ForceDash:", ForceDashEvent and "FOUND" or "NOT FOUND")
-        print("  TryDash:", TryDashEvent and "FOUND" or "NOT FOUND")
-        print("  TryAttackBridge:", TryAttackBridge and "FOUND" or "NOT FOUND")
-        print("  TryAbilityBridge:", TryAbilityBridge and "FOUND" or "NOT FOUND")
-    end
-end
-
--- Attribute management
 local function setAttribute(name, value)
     local char = getCharacter()
     if char then
@@ -188,10 +124,40 @@ local function getAttribute(name)
     return nil
 end
 
--- Combat exploit functions
+-- Get Events
+local Events, MobileEvents, ForceDashEvent, TryDashEvent
+local TryAttackBridge, TryAbilityBridge, HandleBlockBridge
+
+local function initializeEvents()
+    pcall(function()
+        Events = ReplicatedStorage:WaitForChild("Events", 5)
+        MobileEvents = ReplicatedStorage:WaitForChild("MobileEvents", 5)
+        
+        if Events then
+            ForceDashEvent = Events:FindFirstChild("ForceDash")
+        end
+        
+        if MobileEvents then
+            TryDashEvent = MobileEvents:FindFirstChild("TryDash")
+        end
+        
+        local success, bridgeNet = pcall(function()
+            return shared.BridgeNet2 or require(game:GetService("ReplicatedFirst"):WaitForChild("BridgeNet2", 5))
+        end)
+        
+        if success and bridgeNet then
+            pcall(function()
+                TryAttackBridge = bridgeNet.ReferenceBridge("TryAttack")
+                TryAbilityBridge = bridgeNet.ReferenceBridge("TryAbility")
+                HandleBlockBridge = bridgeNet.ReferenceBridge("HandleBlock")
+            end)
+        end
+    end)
+end
+
+-- Combat Functions
 local function refillStats()
     if not Config.UnlimitedStamina then return end
-    
     local charData = getCharacterData()
     if not charData then return end
     
@@ -212,31 +178,26 @@ local function toggleHyperArmor(enabled)
     if enabled then
         setAttribute("HyperArmor", tick())
         setAttribute("SuperArmor", tick())
-        State.isFeatureActive.HyperArmor = true
     else
         setAttribute("HyperArmor", nil)
         setAttribute("SuperArmor", nil)
-        State.isFeatureActive.HyperArmor = false
     end
 end
 
 local function toggleSlowMoNoDamage(enabled)
     setAttribute("SlowMoNoDamage", enabled and tick() or nil)
-    State.isFeatureActive.SlowMoNoDamage = enabled
 end
 
 local function toggleDashInvulnerable(enabled)
     setAttribute("DashInvulnerable", enabled and true or nil)
-    State.isFeatureActive.DashInvulnerable = enabled
 end
 
 local function toggleFreeDash(enabled)
     setAttribute("ClientFreeDash", enabled and Workspace:GetServerTimeNow() or nil)
     setAttribute("FreeDash", enabled and true or nil)
-    State.isFeatureActive.FreeDash = enabled
 end
 
--- Dodge direction calculation
+-- Dodge Functions
 local function getDodgeDirection()
     local char = getCharacter()
     local hrp = getHumanoidRootPart()
@@ -278,12 +239,14 @@ local function getDodgeDirection()
             direction = "Left"
             dirVector = -hrp.CFrame.RightVector
         end
+    elseif Config.DirectionMode == "Backward" then
+        direction = "Backward"
+        dirVector = -hrp.CFrame.LookVector
     end
     
     return direction, dirVector
 end
 
--- Execute dodge
 local function executeDodge(direction, isPerfect)
     local char = getCharacter()
     if not char then return end
@@ -295,7 +258,6 @@ local function executeDodge(direction, isPerfect)
         State.perfectDodges = State.perfectDodges + 1
     end
     
-    -- Set dodge attributes
     setAttribute("NeededDirection", direction)
     if isPerfect then
         setAttribute("Perfect", Workspace:GetServerTimeNow())
@@ -303,7 +265,6 @@ local function executeDodge(direction, isPerfect)
     
     local _, dirVector = getDodgeDirection()
     
-    -- Method 1: ForceDash with direction
     if ForceDashEvent then
         pcall(function()
             ForceDashEvent:Fire({
@@ -311,11 +272,9 @@ local function executeDodge(direction, isPerfect)
                 MoveVector = dirVector
             })
         end)
-        if Config.Debug then print("[AutoDodge] Used ForceDash") end
         return true
     end
     
-    -- Method 2: TryDash with simulated input
     if TryDashEvent then
         setAttribute("SimulatedInput", dirVector)
         pcall(function()
@@ -324,28 +283,14 @@ local function executeDodge(direction, isPerfect)
         task.delay(0.1, function()
             setAttribute("SimulatedInput", nil)
         end)
-        if Config.Debug then print("[AutoDodge] Used TryDash") end
         return true
     end
     
     return false
 end
 
--- Auto counter after dodge
-local function autoCounter()
-    if not Config.AutoCounterAfterDodge then return end
-    if not TryAttackBridge then return end
-    
-    task.delay(0.05, function()
-        pcall(function()
-            TryAttackBridge:Fire({})
-        end)
-    end)
-end
-
--- Check if should dodge
 local function shouldDodge()
-    if not Config.AutoDodge or not Config.Enabled then return false end
+    if not Config.AutoDodge then return false end
     
     local char = getCharacter()
     if not char then return false end
@@ -355,20 +300,16 @@ local function shouldDodge()
     
     if not occupied or not charData then return false end
     
-    -- Check if already dashing
     local dashing = occupied:FindFirstChild("Dashing")
     if dashing and dashing.Value then return false end
     
-    -- Check dodge cooldown
     if tick() - State.lastDodge < 0.3 then return false end
     
-    -- Check mode
     if Config.DodgeMode == "WhenLocked" then
         local lockedOn = occupied:FindFirstChild("LockedOn")
         if not lockedOn or not lockedOn.Value then return false end
     end
     
-    -- Check opponent state
     local opponent = charData:FindFirstChild("Opponent")
     if not opponent or not opponent.Value then return false end
     
@@ -378,27 +319,25 @@ local function shouldDodge()
     
     if not punching and not landTime then return false end
     
-    -- Check timing for perfect dodge
     if landTime then
         local serverTime = Workspace:GetServerTimeNow()
         local timeUntilHit = landTime - serverTime
         local ping = Workspace:FindFirstChild("Ping") and Workspace.Ping.Value or 0.05
-        
-        local adjustedTime = timeUntilHit - (ping / 2) + 0.045 + 0.15 -- RollbackTime
+        local adjustedTime = timeUntilHit - (ping / 2) + 0.045 + 0.15
         
         if adjustedTime > 0 and adjustedTime < Config.DodgeWindow then
-            return true, true -- Should dodge, is perfect timing
+            return true, true
         end
     end
     
     if punching then
-        return true, false -- Should dodge, not perfect timing
+        return true, false
     end
     
     return false
 end
 
--- Auto attack function
+-- Auto Attack
 local function autoAttack()
     if not Config.AutoAttack then return end
     if tick() - State.lastAttack < Config.AutoAttackDelay then return end
@@ -424,82 +363,69 @@ local function autoAttack()
     end
 end
 
--- Hitbox visualization
-local function createHitboxVisual(part, color)
-    local visual = Instance.new("BoxHandleAdornment")
-    visual.Name = "HitboxVisual"
-    visual.Adornee = part
-    visual.Size = part.Size
-    visual.Color3 = color
-    visual.Transparency = 0.5
-    visual.AlwaysOnTop = true
-    visual.ZIndex = 5
-    visual.Parent = part
-    return visual
-end
-
-local function updateHitboxVisualization()
-    -- Clear existing
-    for _, visual in pairs(State.hitboxVisuals) do
-        if visual and visual.Parent then
-            visual:Destroy()
-        end
-    end
-    State.hitboxVisuals = {}
+-- Auto Block
+local function autoBlock()
+    if not Config.AutoBlock then return end
     
-    if not Config.VisualizeHitboxes and not Config.VisualizeHurtboxes then return end
+    local charData = getCharacterData()
+    if not charData then return end
     
-    -- Find hitboxes in Workspace
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj.Name == "Hitbox" and obj:IsA("BasePart") then
-            if Config.VisualizeHitboxes then
-                local visual = createHitboxVisual(obj, Color3.fromRGB(255, 0, 0))
-                table.insert(State.hitboxVisuals, visual)
-            end
-        end
-    end
+    local opponent = charData:FindFirstChild("Opponent")
+    if not opponent or not opponent.Value then return end
     
-    -- Find hurtboxes (player hitboxes)
-    if Config.VisualizeHurtboxes then
-        for _, player in pairs(Players:GetPlayers()) do
-            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                local hrp = player.Character.HumanoidRootPart
-                local visual = createHitboxVisual(hrp, Color3.fromRGB(0, 255, 0))
-                visual.Size = Vector3.new(3, 6, 2.25) -- FightingHitboxSize from GameplaySettings
-                table.insert(State.hitboxVisuals, visual)
-            end
-        end
+    local oppChar = opponent.Value
+    local punching = oppChar:GetAttribute("Punching")
+    
+    if punching and HandleBlockBridge then
+        pcall(function()
+            HandleBlockBridge:Fire(true)
+        end)
     end
 end
 
--- ESP functions
+-- ESP Functions
 local function createESP(player)
     if player == LocalPlayer then return end
     
     local esp = Instance.new("BillboardGui")
     esp.Name = "ESP_" .. player.Name
     esp.AlwaysOnTop = true
-    esp.Size = UDim2.new(0, 100, 0, 50)
+    esp.Size = UDim2.new(0, 150, 0, 60)
     esp.StudsOffset = Vector3.new(0, 3, 0)
+    
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    frame.BackgroundTransparency = 0.5
+    frame.BorderSizePixel = 0
+    frame.Parent = esp
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = frame
     
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Name = "NameLabel"
-    nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+    nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
     nameLabel.BackgroundTransparency = 1
     nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     nameLabel.TextStrokeTransparency = 0
     nameLabel.Text = player.Name
-    nameLabel.Parent = esp
+    nameLabel.TextScaled = true
+    nameLabel.Font = Enum.Font.GothamBold
+    nameLabel.Parent = frame
     
     local infoLabel = Instance.new("TextLabel")
     infoLabel.Name = "InfoLabel"
-    infoLabel.Size = UDim2.new(1, 0, 0.5, 0)
-    infoLabel.Position = UDim2.new(0, 0, 0.5, 0)
+    infoLabel.Size = UDim2.new(1, 0, 0.6, 0)
+    infoLabel.Position = UDim2.new(0, 0, 0.4, 0)
     infoLabel.BackgroundTransparency = 1
     infoLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
     infoLabel.TextStrokeTransparency = 0
-    infoLabel.Text = "?"
-    infoLabel.Parent = esp
+    infoLabel.Text = "Loading..."
+    infoLabel.TextScaled = true
+    infoLabel.Font = Enum.Font.Gotham
+    infoLabel.Parent = frame
     
     State.espObjects[player] = esp
     return esp
@@ -514,7 +440,6 @@ local function updateESP()
             if player.Character and player.Character:FindFirstChild("Head") then
                 esp.Parent = player.Character.Head
                 
-                -- Update info
                 if Config.ShowOpponentInfo then
                     local states = Workspace:FindFirstChild("States")
                     local playerState = states and states:FindFirstChild(player.Name)
@@ -527,10 +452,10 @@ local function updateESP()
                         
                         local info = ""
                         if health then info = info .. "HP:" .. math.floor(health.Health) .. " " end
-                        if stamina then info = info .. "ST:" .. math.floor(stamina.Value) .. " " end
-                        if blocking and blocking.Value then info = info .. "[BLOCKING]" end
+                        if stamina then info = info .. "ST:" .. math.floor(stamina.Value) end
+                        if blocking and blocking.Value then info = info .. "\n[BLOCKING]" end
                         
-                        local infoLabel = esp:FindFirstChild("InfoLabel")
+                        local infoLabel = esp:FindFirstChild("Frame") and esp.Frame:FindFirstChild("InfoLabel")
                         if infoLabel then
                             infoLabel.Text = info
                         end
@@ -542,7 +467,6 @@ local function updateESP()
         end
     end
     
-    -- Create ESP for new players
     if Config.ESPEnabled then
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and not State.espObjects[player] then
@@ -552,296 +476,486 @@ local function updateESP()
     end
 end
 
--- Speed hack
+-- Hitbox Visualization
+local function updateHitboxVisualization()
+    for _, visual in pairs(State.hitboxVisuals) do
+        if visual and visual.Parent then
+            visual:Destroy()
+        end
+    end
+    State.hitboxVisuals = {}
+    
+    if not Config.VisualizeHitboxes and not Config.VisualizeHurtboxes then return end
+    
+    if Config.VisualizeHurtboxes then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local hrp = player.Character.HumanoidRootPart
+                local visual = Instance.new("BoxHandleAdornment")
+                visual.Name = "HurtboxVisual"
+                visual.Adornee = hrp
+                visual.Size = Vector3.new(3, 6, 2.25)
+                visual.Color3 = player == LocalPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+                visual.Transparency = 0.5
+                visual.AlwaysOnTop = true
+                visual.ZIndex = 5
+                visual.Parent = hrp
+                table.insert(State.hitboxVisuals, visual)
+            end
+        end
+    end
+end
+
+-- Speed Hack
 local function updateSpeedHack()
     if not Config.SpeedHack then return end
-    
     local humanoid = getHumanoid()
     if humanoid then
         humanoid.WalkSpeed = 9 * Config.SpeedMultiplier
     end
 end
 
--- Create GUI
-local function createGUI()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "AutoDodgeGUI"
-    gui.ResetOnSpawn = false
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    
-    local mainFrame = Instance.new("Frame")
-    mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 280, 0, 400)
-    mainFrame.Position = UDim2.new(0, 10, 0.5, -200)
-    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    mainFrame.BorderSizePixel = 0
-    mainFrame.Parent = gui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = mainFrame
-    
-    -- Title
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 35)
-    title.BackgroundColor3 = Color3.fromRGB(75, 25, 120)
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.Text = "AutoDodge v4.0 - Exploit Suite"
-    title.TextSize = 16
-    title.Font = Enum.Font.GothamBold
-    title.Parent = mainFrame
-    
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 8)
-    titleCorner.Parent = title
-    
-    -- Status
-    local status = Instance.new("TextLabel")
-    status.Name = "Status"
-    status.Size = UDim2.new(1, -10, 0, 60)
-    status.Position = UDim2.new(0, 5, 0, 40)
-    status.BackgroundTransparency = 1
-    status.TextColor3 = Color3.fromRGB(200, 200, 200)
-    status.Text = "Loading..."
-    status.TextSize = 12
-    status.Font = Enum.Font.Gotham
-    status.TextXAlignment = Enum.TextXAlignment.Left
-    status.TextYAlignment = Enum.TextYAlignment.Top
-    status.Parent = mainFrame
-    
-    -- Feature list
-    local features = Instance.new("TextLabel")
-    features.Name = "Features"
-    features.Size = UDim2.new(1, -10, 0, 280)
-    features.Position = UDim2.new(0, 5, 0, 105)
-    features.BackgroundTransparency = 1
-    features.TextColor3 = Color3.fromRGB(180, 180, 180)
-    features.Text = [[Features (Keybinds):
-[]] - Toggle All
-P - Auto Dodge
-O - Unlimited Stamina
-I - Hyper Armor
-U - ESP
-Y - Hitbox Viz
-T - Auto Attack
-
-Active Features:
-(updating...)]]
-    features.TextSize = 11
-    features.Font = Enum.Font.Gotham
-    features.TextXAlignment = Enum.TextXAlignment.Left
-    features.TextYAlignment = Enum.TextYAlignment.Top
-    features.Parent = mainFrame
-    
-    -- Minimize button
-    local minimizeBtn = Instance.new("TextButton")
-    minimizeBtn.Name = "Minimize"
-    minimizeBtn.Size = UDim2.new(0, 25, 0, 25)
-    minimizeBtn.Position = UDim2.new(1, -30, 0, 5)
-    minimizeBtn.BackgroundTransparency = 1
-    minimizeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    minimizeBtn.Text = "-"
-    minimizeBtn.TextSize = 20
-    minimizeBtn.Font = Enum.Font.GothamBold
-    minimizeBtn.Parent = mainFrame
-    
-    local isMinimized = false
-    minimizeBtn.MouseButton1Click:Connect(function()
-        isMinimized = not isMinimized
-        if isMinimized then
-            mainFrame.Size = UDim2.new(0, 280, 0, 35)
-            minimizeBtn.Text = "+"
-        else
-            mainFrame.Size = UDim2.new(0, 280, 0, 400)
-            minimizeBtn.Text = "-"
+-- Infinite Jump
+local function setupInfiniteJump()
+    UserInputService.JumpRequest:Connect(function()
+        if Config.InfiniteJump then
+            local humanoid = getHumanoid()
+            if humanoid then
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
         end
     end)
-    
-    -- Make draggable
-    local dragging, dragStart, startPos
-    title.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
-        end
-    end)
-    
-    title.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-    
-    gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-    return gui, status, features
 end
 
--- Update GUI
-local guiInstance, statusLabel, featuresLabel = nil, nil, nil
-
-local function updateGUI()
-    if not statusLabel or not featuresLabel then return end
-    
-    local rate = State.totalDodges > 0 and math.floor((State.perfectDodges / State.totalDodges) * 100) or 0
-    
-    statusLabel.Text = string.format(
-        "Status: %s\nPerfect Dodges: %d/%d (%d%%)\nPing: %dms",
-        Config.Enabled and "ACTIVE" or "DISABLED",
-        State.perfectDodges, State.totalDodges, rate,
-        math.floor((Workspace:FindFirstChild("Ping") and Workspace.Ping.Value or 0) * 1000)
-    )
-    
-    local activeList = {}
-    if Config.AutoDodge then table.insert(activeList, "AutoDodge") end
-    if Config.UnlimitedStamina then table.insert(activeList, "UnlimitedStamina") end
-    if Config.HyperArmor then table.insert(activeList, "HyperArmor") end
-    if Config.SlowMoNoDamage then table.insert(activeList, "SlowMoNoDamage") end
-    if Config.DashInvulnerable then table.insert(activeList, "DashInvuln") end
-    if Config.FreeDashWhileStunned then table.insert(activeList, "FreeDash") end
-    if Config.AutoCounterAfterDodge then table.insert(activeList, "AutoCounter") end
-    if Config.ESPEnabled then table.insert(activeList, "ESP") end
-    if Config.VisualizeHitboxes then table.insert(activeList, "HitboxViz") end
-    if Config.AutoAttack then table.insert(activeList, "AutoAttack") end
-    if Config.SpeedHack then table.insert(activeList, "SpeedHack") end
-    
-    featuresLabel.Text = [[Features (Keybinds):
-[]] - Toggle All
-P - Auto Dodge
-O - Unlimited Stamina  
-I - Hyper Armor
-U - ESP
-Y - Hitbox Viz
-T - Auto Attack
-
-Active Features:
-]] .. (#activeList > 0 and table.concat(activeList, ", ") or "None")
+-- Anti AFK
+local function setupAntiAFK()
+    local VirtualUser = game:GetService("VirtualUser")
+    LocalPlayer.Idled:Connect(function()
+        if Config.AntiAFK then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+        end
+    end)
 end
 
--- Input handling
-local function handleInput(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Config.ToggleKey then
-        Config.Enabled = not Config.Enabled
-        print("[AutoDodge] " .. (Config.Enabled and "ENABLED" or "DISABLED"))
-    elseif input.KeyCode == Config.DodgeToggleKey then
-        Config.AutoDodge = not Config.AutoDodge
-        print("[AutoDodge] Auto Dodge: " .. (Config.AutoDodge and "ON" or "OFF"))
-    elseif input.KeyCode == Config.StaminaToggleKey then
-        Config.UnlimitedStamina = not Config.UnlimitedStamina
-        print("[AutoDodge] Unlimited Stamina: " .. (Config.UnlimitedStamina and "ON" or "OFF"))
-    elseif input.KeyCode == Config.HyperArmorKey then
-        Config.HyperArmor = not Config.HyperArmor
-        toggleHyperArmor(Config.HyperArmor)
-        print("[AutoDodge] Hyper Armor: " .. (Config.HyperArmor and "ON" or "OFF"))
-    elseif input.KeyCode == Config.ESPKey then
-        Config.ESPEnabled = not Config.ESPEnabled
-        Config.ShowOpponentInfo = Config.ESPEnabled
-        print("[AutoDodge] ESP: " .. (Config.ESPEnabled and "ON" or "OFF"))
-    elseif input.KeyCode == Config.HitboxKey then
-        Config.VisualizeHitboxes = not Config.VisualizeHitboxes
-        Config.VisualizeHurtboxes = Config.VisualizeHitboxes
-        updateHitboxVisualization()
-        print("[AutoDodge] Hitbox Viz: " .. (Config.VisualizeHitboxes and "ON" or "OFF"))
-    elseif input.KeyCode == Config.AutoAttackKey then
-        Config.AutoAttack = not Config.AutoAttack
-        print("[AutoDodge] Auto Attack: " .. (Config.AutoAttack and "ON" or "OFF"))
-    end
-end
-
--- Main loop
+-- Main Loop
 local function mainLoop()
-    -- Auto dodge check
     local should, isPerfect = shouldDodge()
     if should then
         local direction, _ = getDodgeDirection()
-        local success = executeDodge(direction, isPerfect)
-        
-        if success and isPerfect and Config.AutoCounterAfterDodge then
-            autoCounter()
-        end
+        executeDodge(direction, isPerfect)
     end
     
-    -- Refill stats
     refillStats()
     
-    -- Update exploits
-    if Config.HyperArmor and not State.isFeatureActive.HyperArmor then
+    if Config.HyperArmor then
         toggleHyperArmor(true)
+    end
+    
+    if Config.SlowMoNoDamage then
+        toggleSlowMoNoDamage(true)
+    end
+    
+    if Config.DashInvulnerable then
+        toggleDashInvulnerable(true)
     end
     
     if Config.FreeDashWhileStunned then
         toggleFreeDash(true)
     end
     
-    -- Auto attack
     autoAttack()
-    
-    -- Speed hack
+    autoBlock()
     updateSpeedHack()
 end
 
--- Slower update loop
 local function slowUpdate()
     updateESP()
     updateHitboxVisualization()
-    updateGUI()
 end
 
--- Initialize
-local function initialize()
-    print("[AutoDodge] Initializing v4.0...")
-    
-    -- Wait for character
-    if not getCharacter() then
-        LocalPlayer.CharacterAdded:Wait()
-        task.wait(1)
+-- Create Fluent UI
+local Window = Fluent:CreateWindow({
+    Title = "Boxing Exploit Hub",
+    SubTitle = "by Rise",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.U
+})
+
+-- Tabs
+local Tabs = {
+    Combat = Window:AddTab({ Title = "Combat", Icon = "sword" }),
+    Movement = Window:AddTab({ Title = "Movement", Icon = "zap" }),
+    Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }),
+    Misc = Window:AddTab({ Title = "Misc", Icon = "settings" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "save" })
+}
+
+-- ============== COMBAT TAB ==============
+Tabs.Combat:AddParagraph({
+    Title = "Auto Dodge",
+    Content = "Automatically dodge incoming attacks with perfect timing"
+})
+
+Tabs.Combat:AddToggle("AutoDodge", {
+    Title = "Auto Dodge",
+    Default = false,
+    Callback = function(value)
+        Config.AutoDodge = value
     end
-    
-    -- Initialize events
-    initializeEvents()
-    
-    -- Create GUI
-    guiInstance, statusLabel, featuresLabel = createGUI()
-    
-    -- Connect input
-    UserInputService.InputBegan:Connect(handleInput)
-    
-    -- Main loop - fast update for combat
-    RunService.RenderStepped:Connect(mainLoop)
-    
-    -- Slow update for visuals
-    task.spawn(function()
-        while task.wait(0.5) do
-            pcall(slowUpdate)
+})
+
+Tabs.Combat:AddDropdown("DodgeMode", {
+    Title = "Dodge Mode",
+    Values = {"Always", "WhenLocked", "WhenAttacked"},
+    Multi = false,
+    Default = "Always",
+    Callback = function(value)
+        Config.DodgeMode = value
+    end
+})
+
+Tabs.Combat:AddDropdown("DirectionMode", {
+    Title = "Dodge Direction",
+    Values = {"Away", "Left", "Right", "Backward", "Random"},
+    Multi = false,
+    Default = "Away",
+    Callback = function(value)
+        Config.DirectionMode = value
+    end
+})
+
+Tabs.Combat:AddSlider("DodgeWindow", {
+    Title = "Dodge Window",
+    Description = "Timing window for perfect dodge",
+    Default = 0.15,
+    Min = 0.05,
+    Max = 0.3,
+    Rounding = 2,
+    Callback = function(value)
+        Config.DodgeWindow = value
+    end
+})
+
+Tabs.Combat:AddDivider()
+
+Tabs.Combat:AddParagraph({
+    Title = "Auto Combat",
+    Content = "Automatic attack and block features"
+})
+
+Tabs.Combat:AddToggle("AutoAttack", {
+    Title = "Auto Attack",
+    Default = false,
+    Callback = function(value)
+        Config.AutoAttack = value
+    end
+})
+
+Tabs.Combat:AddSlider("AutoAttackDelay", {
+    Title = "Attack Delay",
+    Description = "Delay between attacks",
+    Default = 0.3,
+    Min = 0.1,
+    Max = 1,
+    Rounding = 2,
+    Callback = function(value)
+        Config.AutoAttackDelay = value
+    end
+})
+
+Tabs.Combat:AddToggle("AutoBlock", {
+    Title = "Auto Block",
+    Default = false,
+    Callback = function(value)
+        Config.AutoBlock = value
+    end
+})
+
+Tabs.Combat:AddToggle("AutoCounter", {
+    Title = "Auto Counter After Dodge",
+    Default = false,
+    Callback = function(value)
+        Config.AutoCounterAfterDodge = value
+    end
+})
+
+Tabs.Combat:AddDivider()
+
+Tabs.Combat:AddParagraph({
+    Title = "Combat Exploits",
+    Content = "Warning: These may be detected"
+})
+
+Tabs.Combat:AddToggle("UnlimitedStamina", {
+    Title = "Unlimited Stamina (Client)",
+    Description = "Keeps stamina/block/ult at max (visual only)",
+    Default = false,
+    Callback = function(value)
+        Config.UnlimitedStamina = value
+    end
+})
+
+Tabs.Combat:AddToggle("HyperArmor", {
+    Title = "Hyper Armor",
+    Description = "Prevents knockback and interruption",
+    Default = false,
+    Callback = function(value)
+        Config.HyperArmor = value
+        if not value then
+            toggleHyperArmor(false)
         end
-    end)
-    
-    -- Character respawn handling
-    LocalPlayer.CharacterAdded:Connect(function()
-        task.wait(1)
-        initializeEvents()
+    end
+})
+
+Tabs.Combat:AddToggle("SlowMoNoDamage", {
+    Title = "SlowMo No Damage",
+    Description = "No damage during slow-mo",
+    Default = false,
+    Callback = function(value)
+        Config.SlowMoNoDamage = value
+        if not value then
+            toggleSlowMoNoDamage(false)
+        end
+    end
+})
+
+Tabs.Combat:AddToggle("DashInvulnerable", {
+    Title = "Dash Invulnerable",
+    Description = "Makes dashes invulnerable",
+    Default = false,
+    Callback = function(value)
+        Config.DashInvulnerable = value
+        if not value then
+            toggleDashInvulnerable(false)
+        end
+    end
+})
+
+-- ============== MOVEMENT TAB ==============
+Tabs.Movement:AddParagraph({
+    Title = "Movement Features",
+    Content = "Speed and movement modifications"
+})
+
+Tabs.Movement:AddToggle("SpeedHack", {
+    Title = "Speed Hack",
+    Default = false,
+    Callback = function(value)
+        Config.SpeedHack = value
+        if not value then
+            local humanoid = getHumanoid()
+            if humanoid then
+                humanoid.WalkSpeed = 9
+            end
+        end
+    end
+})
+
+Tabs.Movement:AddSlider("SpeedMultiplier", {
+    Title = "Speed Multiplier",
+    Default = 1.5,
+    Min = 1,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(value)
+        Config.SpeedMultiplier = value
+    end
+})
+
+Tabs.Movement:AddToggle("FreeDash", {
+    Title = "Free Dash While Stunned",
+    Description = "Allows dashing even when stunned",
+    Default = false,
+    Callback = function(value)
+        Config.FreeDashWhileStunned = value
+        if not value then
+            toggleFreeDash(false)
+        end
+    end
+})
+
+Tabs.Movement:AddToggle("InfiniteJump", {
+    Title = "Infinite Jump",
+    Default = false,
+    Callback = function(value)
+        Config.InfiniteJump = value
+    end
+})
+
+Tabs.Movement:AddButton({
+    Title = "Teleport to Opponent",
+    Description = "Teleports you to your current opponent",
+    Callback = function()
+        local charData = getCharacterData()
+        if charData then
+            local opponent = charData:FindFirstChild("Opponent")
+            if opponent and opponent.Value and opponent.Value.PrimaryPart then
+                local hrp = getHumanoidRootPart()
+                if hrp then
+                    hrp.CFrame = opponent.Value.PrimaryPart.CFrame * CFrame.new(0, 0, 3)
+                    Fluent:Notify({
+                        Title = "Teleport",
+                        Content = "Teleported to " .. opponent.Value.Name,
+                        Duration = 3
+                    })
+                end
+            else
+                Fluent:Notify({
+                    Title = "Teleport",
+                    Content = "No opponent found!",
+                    Duration = 3
+                })
+            end
+        end
+    end
+})
+
+-- ============== VISUALS TAB ==============
+Tabs.Visuals:AddParagraph({
+    Title = "ESP Features",
+    Content = "See players through walls"
+})
+
+Tabs.Visuals:AddToggle("ESP", {
+    Title = "Player ESP",
+    Default = false,
+    Callback = function(value)
+        Config.ESPEnabled = value
+        Config.ShowOpponentInfo = value
+        if not value then
+            for _, esp in pairs(State.espObjects) do
+                esp:Destroy()
+            end
+            State.espObjects = {}
+        end
+    end
+})
+
+Tabs.Visuals:AddDivider()
+
+Tabs.Visuals:AddParagraph({
+    Title = "Hitbox Visualization",
+    Content = "See hitboxes and hurtboxes"
+})
+
+Tabs.Visuals:AddToggle("VisualizeHurtboxes", {
+    Title = "Show Player Hurtboxes",
+    Description = "Shows player hitbox areas",
+    Default = false,
+    Callback = function(value)
+        Config.VisualizeHurtboxes = value
+    end
+})
+
+Tabs.Visuals:AddToggle("VisualizeHitboxes", {
+    Title = "Show Attack Hitboxes",
+    Description = "Shows attack hitboxes",
+    Default = false,
+    Callback = function(value)
+        Config.VisualizeHitboxes = value
+    end
+})
+
+-- ============== MISC TAB ==============
+Tabs.Misc:AddParagraph({
+    Title = "Miscellaneous Features",
+    Content = "Quality of life features"
+})
+
+Tabs.Misc:AddToggle("AntiAFK", {
+    Title = "Anti AFK",
+    Default = true,
+    Callback = function(value)
+        Config.AntiAFK = value
+    end
+})
+
+Tabs.Misc:AddButton({
+    Title = "Reset Stats Counter",
+    Description = "Reset perfect dodge statistics",
+    Callback = function()
         State.perfectDodges = 0
         State.totalDodges = 0
-    end)
-    
-    print("[AutoDodge] v4.0 Loaded!")
-    print("[AutoDodge] Press ] to toggle, P for dodge, O for stamina")
-end
+        Fluent:Notify({
+            Title = "Stats Reset",
+            Content = "Dodge statistics have been reset",
+            Duration = 3
+        })
+    end
+})
 
--- Start
-initialize()
+Tabs.Misc:AddButton({
+    Title = "Show Current Stats",
+    Description = "Display dodge statistics",
+    Callback = function()
+        local rate = State.totalDodges > 0 and math.floor((State.perfectDodges / State.totalDodges) * 100) or 0
+        local ping = Workspace:FindFirstChild("Ping") and math.floor(Workspace.Ping.Value * 1000) or 0
+        Fluent:Notify({
+            Title = "Statistics",
+            Content = string.format(
+                "Perfect Dodges: %d/%d (%d%%)\nCurrent Ping: %dms",
+                State.perfectDodges, State.totalDodges, rate, ping
+            ),
+            Duration = 5
+        })
+    end
+})
+
+Tabs.Misc:AddDivider()
+
+Tabs.Misc:AddParagraph({
+    Title = "Credits",
+    Content = "Made by Rise\nBased on comprehensive codebase analysis\n\nPress U to hide/show UI"
+})
+
+-- ============== SETTINGS TAB ==============
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+InterfaceManager:SetFolder("BoxingExploitHub")
+SaveManager:SetFolder("BoxingExploitHub/configs")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+-- Initialize
+initializeEvents()
+setupInfiniteJump()
+setupAntiAFK()
+
+-- Main Loops
+RunService.RenderStepped:Connect(mainLoop)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        pcall(slowUpdate)
+    end
+end)
+
+-- Character respawn handling
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    initializeEvents()
+end)
+
+-- Select default tab
+Window:SelectTab(1)
+
+-- Welcome notification
+Fluent:Notify({
+    Title = "Boxing Exploit Hub",
+    Content = "Loaded successfully!\nMade by Rise\nPress U to hide/show",
+    Duration = 5
+})
+
+print("[Boxing Hub] Loaded successfully! Made by Rise")
+print("[Boxing Hub] Press U to hide/show UI")
 
 return Config
