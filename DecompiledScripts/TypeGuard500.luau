@@ -1,0 +1,1 @@
+return require(script.Parent.Parent["tpc9000_typeguard@4.0.0"].typeguard);
